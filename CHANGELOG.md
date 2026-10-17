@@ -4,6 +4,17 @@ All notable changes to SpecsScanner are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.3] - 2026-10-17
+
+### Changed
+
+- Reports are now written next to `SpecsScanner.ps1` / `specsscanner.cmd`
+  instead of the current working directory. Double-clicking the launcher,
+  running it elevated (where the working directory would otherwise be
+  `C:\Windows\System32`) and launching it from any other folder now all land
+  the HTML in the tool's own folder. `-OutputPath` is unchanged.
+- `specsscanner.cmd` now sets its working directory to its own folder first.
+
 ## [2.1.2] - 2026-10-17
 
 ### Fixed

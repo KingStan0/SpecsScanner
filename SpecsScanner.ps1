@@ -11,7 +11,8 @@
 .PARAMETER OutputPath
     Where to write the report. Extension may be .html or .json; the matching
     companion file is written next to it when -Format Both is used.
-    Default: .\SpecsScanner-<hostname>-<timestamp>.html
+    Default: SpecsScanner-<hostname>-<timestamp>.html, saved next to this
+    script (the folder that also holds specsscanner.cmd).
 
 .PARAMETER Format
     Html (default), Json, or Both.
@@ -80,7 +81,7 @@ $ErrorActionPreference = 'Continue'
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-$Script:Version   = '2.1.2'
+$Script:Version   = '2.1.3'
 $Script:IsAdmin   = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Script:RedactMode = [bool]$Redact
 $Script:Warnings  = New-Object System.Collections.ArrayList
@@ -305,7 +306,9 @@ function Resolve-OutputPath {
     if ([string]::IsNullOrWhiteSpace($Path)) {
         $hostPart = $env:COMPUTERNAME
         if ($Script:RedactMode) { $hostPart = 'DESKTOP-EXAMPLE' }
-        $base = Join-Path -Path (Get-Location).Path -ChildPath ('SpecsScanner-{0}-{1}' -f $hostPart, $Stamp)
+        $root = $PSScriptRoot
+        if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
+        $base = Join-Path -Path $root -ChildPath ('SpecsScanner-{0}-{1}' -f $hostPart, $Stamp)
     } else {
         $ext = [System.IO.Path]::GetExtension($Path)
         if ($ext -ieq '.html' -or $ext -ieq '.json') {

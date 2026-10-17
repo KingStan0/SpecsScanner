@@ -53,7 +53,7 @@ The scan takes a few seconds, writes `SpecsScanner-<hostname>-<timestamp>.html` 
 
 | Parameter      | Description                                                              | Default                             |
 | -------------- | ------------------------------------------------------------------------ | ----------------------------------- |
-| `-OutputPath`  | Output file. `.html`/`.json` extension optional, folders are created     | `.\SpecsScanner-<host>-<timestamp>` |
+| `-OutputPath`  | Output file. `.html`/`.json` extension optional, folders are created     | `SpecsScanner-<host>-<timestamp>.html` (next to the script) |
 | `-Format`      | `Html`, `Json` or `Both`                                                 | `Html`                              |
 | `-Sections`    | Comma list of sections, or aliases `Hardware` / `All`                    | `All`                               |
 | `-NoOpen`      | Do not open the report in the browser                                    | (opens)                             |
@@ -109,7 +109,7 @@ For 100% coverage: right-click PowerShell -> **Run as administrator**, then scan
 
 ```json
 {
-  "scanner": { "name": "SpecsScanner", "version": "2.1.2", "elevated": true },
+  "scanner": { "name": "SpecsScanner", "version": "2.1.3", "elevated": true },
   "CPU": { "title": "Processor", "values": { "Name": "AMD Ryzen 5 5600G", "Cores": 6, "...": "..." }, "tables": [ ] },
   "...": { }
 }
