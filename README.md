@@ -109,7 +109,7 @@ For 100% coverage: right-click PowerShell -> **Run as administrator**, then scan
 
 ```json
 {
-  "scanner": { "name": "SpecsScanner", "version": "2.1.1", "elevated": true },
+  "scanner": { "name": "SpecsScanner", "version": "2.1.2", "elevated": true },
   "CPU": { "title": "Processor", "values": { "Name": "AMD Ryzen 5 5600G", "Cores": 6, "...": "..." }, "tables": [ ] },
   "...": { }
 }
@@ -153,7 +153,7 @@ is one deliberate, documented exception for colored `Write-Host` CLI output.
 
 The report ships its complete design system inline - no external assets, nothing to maintain separately:
 
-- **Tokens** - every color comes from CSS variables. Both official Catppuccin palettes (Mocha, Latte) are defined side by side; components only reference theme-aware `--fg-*` names plus semantic `--ok` / `--warn` / `--bad` / `--info` colors. Every text/background pair was verified programmatically for WCAG AA contrast in both themes.
+- **Tokens** - every color comes from CSS variables. Both official Catppuccin palettes (Mocha, Latte) are defined side by side; components only reference theme-aware `--fg-*` names plus semantic `--fg-ok` / `--fg-warn` / `--fg-bad` / `--fg-info` colors. Every text/background pair was verified programmatically for WCAG AA contrast in both themes.
 - **Accent** - `--brand` drives the logo, links, focus rings and active states; `-Accent` picks any of the 14 Catppuccin hues. Section icons get their own structural accent from a per-section registry.
 - **Components** - hero bento tiles, KPI tiles, stat tiles, progress rings, bars, pills, chips, disk/volume/connection/module/monitor cards, checklists, timelines, tables, notes, banners, toasts.
 - **Status color is meaning-only** - green/yellow/red appear only for actual health states; chrome stays quiet.

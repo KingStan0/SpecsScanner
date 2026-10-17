@@ -80,7 +80,7 @@ $ErrorActionPreference = 'Continue'
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-$Script:Version   = '2.1.1'
+$Script:Version   = '2.1.2'
 $Script:IsAdmin   = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Script:RedactMode = [bool]$Redact
 $Script:Warnings  = New-Object System.Collections.ArrayList
@@ -1876,7 +1876,7 @@ svg { display:block; }
 .progress { position:absolute; left:0; right:0; bottom:-1px; height:2px; overflow:hidden; }
 .progress i { display:block; height:100%; width:0;
   background:linear-gradient(90deg, var(--brand), var(--grad-mid), var(--grad-end)); }
-.bar { display:flex; align-items:center; gap:10px; padding:10px 0; flex-wrap:wrap; }
+.topbar { display:flex; align-items:center; gap:10px; padding:10px 0; flex-wrap:wrap; }
 .brand { display:inline-flex; align-items:center; gap:9px; color:var(--text); text-decoration:none; }
 .brand:hover { text-decoration:none; }
 .logo { display:grid; place-items:center; width:30px; height:30px; border-radius:9px;
@@ -2197,7 +2197,7 @@ footer .footlinks { display:flex; gap:14px; flex-wrap:wrap; align-items:center; 
 <body>
 <header class="top">
   <div class="progress" aria-hidden="true"><i id="prog"></i></div>
-  <div class="wrap bar">
+  <div class="wrap topbar">
     <a class="brand" href="#overview">
       <span class="logo">SS</span>
       <span class="bname">SpecsScanner</span>
@@ -2744,7 +2744,7 @@ function ConvertTo-HtmlWidget {
                 $ring = ConvertTo-HtmlRing -Pct ([double]$pct) -CenterText ('{0:N1}%' -f [double]$pct) -ToneVar $tone -AriaLabel ('{0:N1} percent of memory in use' -f [double]$pct)
                 $row += ('<div class="stat" style="display:flex;gap:14px;align-items:center;grid-column:1/-1">{0}<div><div class="slabel">Memory in use</div><div class="svalue">{1:N1}%</div><div class="ssub">{2} free of {3}</div></div></div>' -f $ring, [double]$pct, (ConvertTo-HtmlValue $freeText), (ConvertTo-HtmlValue $totalText))
             }
-            foreach ($st in @($w['sticks'])) {
+            foreach ($st in @($w['sticks'] | Where-Object { $_ })) {
                 $bits = @()
                 if ($st.speed) { $bits += [string]$st.speed }
                 if ($st.type) { $bits += [string]$st.type }
@@ -2768,7 +2768,7 @@ function ConvertTo-HtmlWidget {
         }
         'Displays' {
             $row = ''
-            foreach ($mon in @($w['monitors'])) {
+            foreach ($mon in @($w['monitors'] | Where-Object { $_ })) {
                 $bits = @()
                 if ($mon.mfr) { $bits += [string]$mon.mfr }
                 if ($mon.size) { $bits += [string]$mon.size }
@@ -2779,7 +2779,7 @@ function ConvertTo-HtmlWidget {
         }
         'Storage' {
             $row = ''
-            foreach ($d in @($w['disks'])) {
+            foreach ($d in @($w['disks'] | Where-Object { $_ })) {
                 $tone = Get-ToneFromText ([string]$d.health)
                 $pillIcon = 'unknown'
                 if ($tone -eq 'ok') { $pillIcon = 'ok' }
@@ -2825,7 +2825,7 @@ function ConvertTo-HtmlWidget {
         }
         'Network' {
             $row = ''
-            foreach ($cn in @($w['connections'])) {
+            foreach ($cn in @($w['connections'] | Where-Object { $_ })) {
                 $ledCls = 'led'
                 $stateText = [string]$cn.status
                 if ($cn.connected) { $ledCls = 'led ok' }
@@ -2872,7 +2872,7 @@ function ConvertTo-HtmlWidget {
         }
         'Security' {
             $cards = ''
-            foreach ($ck in @($w['checks'])) {
+            foreach ($ck in @($w['checks'] | Where-Object { $_ })) {
                 $st = [string]$ck.status
                 $icon = 'info'
                 $pillTone = 'info'
@@ -2896,7 +2896,7 @@ function ConvertTo-HtmlWidget {
             if ($null -ne $w['updateCount']) { $tiles += (ConvertTo-HtmlStat -Label 'Installed updates' -Value ([string]$w['updateCount']) -Icon 'package') }
             if ($w['lastUpdate']) { $tiles += (ConvertTo-HtmlStat -Label 'Last update' -Value ([string]$w['lastUpdate']) -Icon 'calendar' -Sub ([string]$w['lastUpdateId'])) }
             if ($tiles -ne '') { $out = ('<div class="wrow">{0}</div>' -f $tiles) }
-            $updates = @($w['updates'])
+            $updates = @($w['updates'] | Where-Object { $_ })
             if ($updates.Count -gt 0) {
                 $tl = ''
                 foreach ($u in $updates) {
@@ -2907,7 +2907,7 @@ function ConvertTo-HtmlWidget {
         }
         'Peripherals' {
             $pills = ''
-            foreach ($cl in @($w['classes'])) {
+            foreach ($cl in @($w['classes'] | Where-Object { $_ })) {
                 $pills += ('<span class="pill t-accent">{0}<b>{1}</b></span>' -f (ConvertTo-HtmlText ([string]$cl.name)), [int]$cl.count)
             }
             if ($pills -ne '') { $out = ('<div style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 2px">{0}</div>' -f $pills) }
@@ -2997,7 +2997,7 @@ function ConvertTo-SummaryText {
     [void]$out.Add($s1 + '.')
     if ($Data.Contains('Storage')) {
         $sw = $Data['Storage'].widgets
-        $disks = @($sw['disks'])
+        $disks = @($sw['disks'] | Where-Object { $_ })
         if ($disks.Count -gt 0 -and $sw['totalBytes']) {
             $diskWord = 'disks'
             if ($disks.Count -eq 1) { $diskWord = 'disk' }
@@ -3009,7 +3009,7 @@ function ConvertTo-SummaryText {
         }
     }
     if ($Data.Contains('Security')) {
-        $checks = @($Data['Security'].widgets['checks'])
+        $checks = @($Data['Security'].widgets['checks'] | Where-Object { $_ })
         if ($checks.Count -gt 0) {
             $okCount = @($checks | Where-Object { $_.status -eq 'ok' }).Count
             if ($okCount -eq $checks.Count) { [void]$out.Add(('All {0} security checks pass.' -f $checks.Count)) }
@@ -3047,7 +3047,7 @@ function ConvertTo-HtmlHero {
     if ($Data.Contains('System')) { $biosVal = [string]$Data['System'].widgets['bios'] }
     if ($biosVal) { $rows += ('<div class="mrow"><span class="mk">Firmware</span><span class="mv">{0}</span></div>' -f (ConvertTo-HtmlText $biosVal)) }
     $uptimeVal = $null
-    if ($Data.Contains('System')) { $uptimeVal = [string]$Data['System'].summary['Uptime'] }
+    if ($Data.Contains('Windows')) { $uptimeVal = [string]$Data['Windows'].summary['Uptime'] }
     if ($uptimeVal) { $rows += ('<div class="mrow"><span class="mk">Uptime</span><span class="mv">{0}</span></div>' -f (ConvertTo-HtmlText $uptimeVal)) }
     $rows += ('<div class="mrow"><span class="mk">Scanned</span><span class="mv">{0} in {1} s</span></div>' -f (ConvertTo-HtmlText ([string]$Meta.Date)), (ConvertTo-HtmlText ([string]$Meta.Elapsed)))
     $ranAs = 'Standard user'
@@ -3082,7 +3082,7 @@ function ConvertTo-HtmlHero {
         if ($mw['installedBytes']) { $memVal = Format-ByteSize $mw['installedBytes'] }
         $bits = @()
         if ($mw['freeBytes']) { $bits += ((Format-ByteSize $mw['freeBytes']) + ' free') }
-        $stickCount = @($mw['sticks']).Count
+        $stickCount = @($mw['sticks'] | Where-Object { $_ }).Count
         if ($stickCount -gt 0) {
             $moduleWord = 'modules'
             if ($stickCount -eq 1) { $moduleWord = 'module' }
@@ -3100,7 +3100,7 @@ function ConvertTo-HtmlHero {
     $gpuSub = ''
     if ($Data.Contains('Graphics')) {
         $gpuVal = ([string]$Data['Graphics'].summary['GPU']).Trim()
-        $adapters = @($Data['Graphics'].widgets['adapters'])
+        $adapters = @($Data['Graphics'].widgets['adapters'] | Where-Object { $_ })
         if ($adapters.Count -gt 0) {
             $bits = @()
             if ($adapters[0].vram) { $bits += [string]$adapters[0].vram }
@@ -3116,7 +3116,7 @@ function ConvertTo-HtmlHero {
     if ($Data.Contains('Storage')) {
         $sw = $Data['Storage'].widgets
         $stVal = Format-ByteSize $sw['totalBytes']
-        $disks = @($sw['disks'])
+        $disks = @($sw['disks'] | Where-Object { $_ })
         $bits = @()
         if ($disks.Count -gt 0) {
             $diskWord = 'disks'
@@ -3142,7 +3142,7 @@ function ConvertTo-HtmlHero {
     # ---- Health strip ----
     $pills = ''
     if ($Data.Contains('Storage')) {
-        $disks2 = @($Data['Storage'].widgets['disks'])
+        $disks2 = @($Data['Storage'].widgets['disks'] | Where-Object { $_ })
         if ($disks2.Count -gt 0) {
             $healthy2 = @($disks2 | Where-Object { ([string]$_.health) -match '(?i)healthy|^ok' }).Count
             $tone = 'ok'
@@ -3151,7 +3151,7 @@ function ConvertTo-HtmlHero {
         }
     }
     if ($Data.Contains('Security')) {
-        foreach ($ck in @($Data['Security'].widgets['checks'])) {
+        foreach ($ck in @($Data['Security'].widgets['checks'] | Where-Object { $_ })) {
             $tone = 'info'
             if ($ck.status -eq 'ok') { $tone = 'ok' }
             elseif ($ck.status -eq 'warn') { $tone = 'warn' }
@@ -3285,7 +3285,7 @@ function ConvertTo-RedactedValue {
             }
             return $State.SerialMap[$s]
         }
-        if ($KeyName -match '(?i)^(ssid|network name|wireless network)$') { return 'EXAMPLE-NETWORK' }
+        if ($KeyName -match '(?i)ssid') { return 'EXAMPLE-NETWORK' }
         if ($KeyName -match '(?i)registered user|^user(name)?$|owner') { return 'EXAMPLE\user' }
         if ($KeyName -match '(?i)registered org') { return 'Example Corp' }
     }

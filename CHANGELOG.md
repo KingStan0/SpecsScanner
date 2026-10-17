@@ -4,6 +4,27 @@ All notable changes to SpecsScanner are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2026-10-17
+
+### Fixed
+
+- Report header: the brand row (logo, host tag, search box, theme buttons) was
+  clipped to a thin strip because it shared the `.bar` CSS class with progress
+  bars; the header row now uses its own `.topbar` class.
+- Progress bars (storage usage, disk wear/life) now render their colored fill -
+  the same class collision had zeroed it.
+- Overview hero: the "Uptime" row now shows the real uptime (it read a summary
+  value that is never set on that path).
+- `-Redact`: Wi-Fi network names (SSID) are now replaced with
+  `EXAMPLE-NETWORK`; the previous key pattern could never match.
+- Displays, Network, Peripherals and Windows update history no longer render a
+  phantom empty card or timeline row when their collector has no data (the
+  `@($null)` array-expansion trap).
+- Overview summary text: no more phantom "Disk health needs attention" or
+  security-check lines on machines without that data.
+- README: corrected the documented semantic color variable names
+  (`--fg-ok` / `--fg-warn` / `--fg-bad` / `--fg-info`).
+
 ## [2.1.1] - 2026-10-17
 
 ### Fixed
