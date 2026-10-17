@@ -1,0 +1,84 @@
+# Changelog
+
+All notable changes to SpecsScanner are documented in this file.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [2.0.0] - 2026-10-17
+
+The "ultimate dashboard" release: a complete redesign of the HTML report plus
+new sharing and personalization options. The report layout, design system and
+component library are now considered final and extensible - new sections plug
+into the existing system without any redesign.
+
+### Added
+
+- **Overview dashboard**: bento hero with device identity, an auto-written
+  plain-language summary anyone can read (no jargon), four KPI tiles
+  (CPU, memory ring, GPU, storage) and a system-health pill strip.
+- **Widgets per section** rendered above the raw tables: stat tiles, memory and
+  battery rings, free-space bars, disk cards with SMART wear/temperature,
+  volume bars, network LED cards with copyable IPv4/MAC/gateway/DNS,
+  memory module cards, monitor cards, a security checklist with plain-language
+  explanations for every check, a Windows update timeline and peripheral chips.
+- **Search everywhere**: press `/` to focus the live filter, `Esc` to clear,
+  with a no-matches empty state and a live row counter.
+- **Sortable tables**: click (or Enter/Space on) any header; numeric, version
+  and date columns sort correctly via `data-v` sort keys; `aria-sort` kept
+  in sync.
+- **Click-to-copy** on identifiers (serials, MACs, IPs, hostnames, UUIDs) with
+  a toast confirmation and a copied-cell flash.
+- **Theme control**: three-way Auto / Latte / Mocha segmented switch; Auto
+  follows the OS in real time; cross-fade transition via View Transitions API
+  where supported; choice remembered per browser.
+- **`-Accent`** parameter: pick any of the 14 Catppuccin hues as the dashboard
+  accent (default Mauve).
+- **`-Redact`** parameter: replaces hostname, user names, serial numbers, MAC
+  addresses, IP addresses, SSIDs and owner/org strings with deterministic
+  placeholders for safe sharing; redacted reports are visibly marked.
+- **`-Theme Auto`** option (in addition to Mocha and Latte).
+- Scroll-progress hairline, scroll-spy navigation, collapse/expand all button,
+  footer with project link and a print button.
+- Inline SVG favicon, `theme-color` meta, `@media (forced-colors: active)`
+  support, `::selection` styling and full `prefers-reduced-motion` handling.
+- New **Firewall** collection (profiles table + per-profile state) and
+  Windows Update history timeline.
+- Full CSS design-system rewrite: theme-aware `--fg-*` token layer, semantic
+  status colors, and a programmatically verified WCAG AA contrast pass for
+  both themes.
+
+### Changed
+
+- Report chrome is "quiet": structural accents no longer use status colors;
+  green/yellow/red now appear only for actual health meaning.
+- Memory summary shows installed RAM in the hero/KPIs (e.g. "24.00 GB") while
+  keeping Windows-visible memory in the detail section, matching how Windows
+  itself reports it.
+- JSON output bumped to `"version": "2.0.0"`.
+
+### Fixed
+
+- Version-like table values (e.g. driver versions) now sort semantically
+  instead of as floats.
+- Removed all "(s)" pluralization artifacts from captions.
+- Fixed un-suppressed `ArrayList.Add` calls that could pollute section objects
+  with stray indices on some systems.
+
+### Removed
+
+- Section entrance animations (design rule: no entrance motion - only hover
+  micro-transitions, open/close and theme cross-fade).
+
+## [1.0.0] - 2026-10-17
+
+### Added
+
+- Initial release: single-file PowerShell CLI scanning 14 sections
+  (System, CPU, Memory, Graphics, Displays, Storage, Network, Audio, Battery,
+  Security, Windows, Peripherals, Installed Software, Services).
+- Single self-contained HTML report (Catppuccin Mocha / Latte with toggle),
+  zero network requests, offline-safe; JSON output via `-Format Both`.
+- `-Sections`, `-OutputPath`, `-NoOpen`, `-Theme` parameters; works unelevated
+  with clear annotations for details that need admin rights.
+- True VRAM via registry (beats the WMI 4 GB cap), SMART data, BitLocker, TPM
+  and battery health detail when elevated.

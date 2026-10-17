@@ -1,0 +1,9 @@
+# Personal scans generated next to the script - never commit these
+/SpecsScanner-*.html
+/SpecsScanner-*.json
+
+# OS junk
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
