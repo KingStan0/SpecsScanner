@@ -4,6 +4,17 @@ All notable changes to SpecsScanner are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-10-17
+
+### Fixed
+
+- `Get-Help .\SpecsScanner.ps1` now shows the full synopsis, parameters,
+  examples and links. `#Requires -Version 5.1` moved below the comment help
+  block, which is required for PowerShell to read it (the version gate itself
+  still works).
+- Removed a no-op statement and an unused variable in the Windows tile
+  renderer, and an unused icon from the SVG registry. No report changes.
+
 ## [2.1.0] - 2026-10-17
 
 ### Added

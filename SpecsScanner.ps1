@@ -1,4 +1,3 @@
-#Requires -Version 5.1
 <#
 .SYNOPSIS
     SpecsScanner - scan every PC specification and render a self-contained HTML report.
@@ -52,6 +51,7 @@
 .LINK
     https://github.com/KingStan0/SpecsScanner
 #>
+#Requires -Version 5.1
 [CmdletBinding()]
 [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '',
     Justification = 'Interactive CLI tool: colored console progress output is intentional; results are written to files.')]
@@ -80,7 +80,7 @@ $ErrorActionPreference = 'Continue'
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-$Script:Version   = '2.1.0'
+$Script:Version   = '2.1.1'
 $Script:IsAdmin   = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Script:RedactMode = [bool]$Redact
 $Script:Warnings  = New-Object System.Collections.ArrayList
@@ -2523,7 +2523,6 @@ $Script:Icons = @{
     'clock'    = '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'
     'calendar' = '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>'
     'zap'      = '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'
-    'therm'    = '<path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>'
 }
 
 function Get-SsIcon {
@@ -2891,9 +2890,7 @@ function ConvertTo-HtmlWidget {
             $tiles = ''
             $act = [string]$w['activation']
             if ($act) {
-                $atone = Get-ToneFromText $act
                 $tiles += (ConvertTo-HtmlStat -Label 'Activation' -Value $act -Icon 'windows')
-                if ($atone -ne 'ok') { $tiles = $tiles.Replace('<div class="stat">', '<div class="stat">') }
             }
             if ($w['build']) { $tiles += (ConvertTo-HtmlStat -Label 'Build' -Value ([string]$w['build']) -Icon 'board') }
             if ($null -ne $w['updateCount']) { $tiles += (ConvertTo-HtmlStat -Label 'Installed updates' -Value ([string]$w['updateCount']) -Icon 'package') }
