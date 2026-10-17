@@ -4,6 +4,29 @@ All notable changes to SpecsScanner are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-10-17
+
+Code-quality release: no functional or visual changes. The script now passes
+[PSScriptAnalyzer](https://learn.microsoft.com/powershell/utility-modules/psscriptanalyzer/overview)
+1.25.0 (its default rule set) with zero findings.
+
+### Changed
+
+- Internal functions renamed to Microsoft's approved verbs and singular nouns:
+  section collectors are now `Read-*` (was `Collect-*`), `Build-HtmlReport`,
+  `Build-HtmlHero` and `Build-AutoSummary` are now `ConvertTo-*`, `New-Section`
+  is now `ConvertTo-Section`, and so on.
+- `Add-SectionTable` is invoked with named parameters everywhere.
+- Colored `Write-Host` console output is now an explicitly declared and
+  justified exception to the "avoid Write-Host" rule.
+
+### Fixed
+
+- Date parsing helpers no longer use empty `catch` blocks and are marginally
+  faster.
+- Removed three unused variables left over from earlier refactors.
+- Report footer and JSON `scanner.version` now read `2.0.1`.
+
 ## [2.0.0] - 2026-10-17
 
 The "ultimate dashboard" release: a complete redesign of the HTML report plus

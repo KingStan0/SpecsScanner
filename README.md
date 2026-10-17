@@ -109,7 +109,7 @@ For 100% coverage: right-click PowerShell -> **Run as administrator**, then scan
 
 ```json
 {
-  "scanner": { "name": "SpecsScanner", "version": "2.0.0", "elevated": true },
+  "scanner": { "name": "SpecsScanner", "version": "2.0.1", "elevated": true },
   "CPU": { "title": "Processor", "values": { "Name": "AMD Ryzen 5 5600G", "Cores": 6, "...": "..." }, "tables": [ ] },
   "...": { }
 }
@@ -139,6 +139,15 @@ SpecsScanner/
 |- LICENSE               # MIT
 \- README.md
 ```
+
+## Code quality
+
+SpecsScanner follows Microsoft's
+[PowerShell development guidelines](https://learn.microsoft.com/powershell/scripting/developer/cmdlet/strongly-encouraged-development-guidelines):
+approved verbs, singular nouns, named parameters, no empty catch blocks. The
+script passes [PSScriptAnalyzer](https://learn.microsoft.com/powershell/utility-modules/psscriptanalyzer/overview)
+1.25.0 with its default rule set and **zero findings** - the only suppression
+is one deliberate, documented exception for colored `Write-Host` CLI output.
 
 ## Design system
 

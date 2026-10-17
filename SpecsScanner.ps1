@@ -48,8 +48,13 @@
 
 .EXAMPLE
     .\SpecsScanner.ps1 -Redact -OutputPath .\share-safe.html
+
+.LINK
+    https://github.com/KingStan0/SpecsScanner
 #>
 [CmdletBinding()]
+[System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '',
+    Justification = 'Interactive CLI tool: colored console progress output is intentional; results are written to files.')]
 param(
     [Parameter(Position = 0)]
     [string]$OutputPath,
@@ -75,7 +80,7 @@ $ErrorActionPreference = 'Continue'
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-$Script:Version   = '2.0.0'
+$Script:Version   = '2.0.1'
 $Script:IsAdmin   = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Script:RedactMode = [bool]$Redact
 $Script:Warnings  = New-Object System.Collections.ArrayList
@@ -139,7 +144,7 @@ function Invoke-Safe {
     }
 }
 
-function Format-Bytes {
+function Format-ByteSize {
     param($Bytes)
     if ($null -eq $Bytes) { return $null }
     try { $b = [double]$Bytes } catch { return $null }
@@ -162,7 +167,9 @@ function ConvertTo-DateTime {
     param($Value)
     if ($null -eq $Value) { return $null }
     if ($Value -is [datetime]) { return $Value }
-    try { return [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$Value) } catch { }
+    # Try the CIM/WMI date format first, then .NET parsing.
+    $wmiDate = Invoke-Safe { [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$Value) }
+    if ($null -ne $wmiDate) { return $wmiDate }
     try { return [datetime]::Parse([string]$Value) } catch { return $null }
 }
 
@@ -242,10 +249,8 @@ function ConvertTo-InstallDateText {
         return $null
     }
     if ($v -match '^\d{9,10}$') {
-        try {
-            $d = [System.DateTimeOffset]::FromUnixTimeSeconds([int64]$v).LocalDateTime
-            if ($d.Year -ge 2000 -and $d.Year -le 2100) { return $d.ToString('yyyy-MM-dd') }
-        } catch { }
+        $unix = Invoke-Safe { [System.DateTimeOffset]::FromUnixTimeSeconds([int64]$v).LocalDateTime }
+        if ($null -ne $unix -and $unix.Year -ge 2000 -and $unix.Year -le 2100) { return $unix.ToString('yyyy-MM-dd') }
         return $null
     }
     $d = [datetime]::MinValue
@@ -295,7 +300,7 @@ function Write-TextFile {
     [System.IO.File]::WriteAllText($Path, $Content, $enc)
 }
 
-function Get-OutputPaths {
+function Resolve-OutputPath {
     param([string]$Path, [string]$Stamp)
     if ([string]::IsNullOrWhiteSpace($Path)) {
         $hostPart = $env:COMPUTERNAME
@@ -317,7 +322,7 @@ function Get-OutputPaths {
     return [ordered]@{ html = ($base + '.html'); json = ($base + '.json') }
 }
 
-function New-Section {
+function ConvertTo-Section {
     param([string]$Title)
     return @{
         title    = $Title
@@ -341,8 +346,8 @@ function Add-SectionTable {
 # ---------------------------------------------------------------------------
 # Collectors
 # ---------------------------------------------------------------------------
-function Collect-System {
-    $sec = New-Section 'System & BIOS'
+function Read-System {
+    $sec = ConvertTo-Section 'System & BIOS'
     $cs   = Invoke-Safe { Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop }
     $csp  = Invoke-Safe { Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop }
     $bios = Invoke-Safe { Get-CimInstance -ClassName Win32_BIOS -ErrorAction Stop }
@@ -426,8 +431,8 @@ function Collect-System {
     return $sec
 }
 
-function Collect-CPU {
-    $sec = New-Section 'Processor'
+function Read-CPU {
+    $sec = ConvertTo-Section 'Processor'
     $cpus = @(Invoke-Safe { Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop } @())
     $cs   = Invoke-Safe { Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop }
     if ($cpus.Count -eq 0) {
@@ -446,8 +451,8 @@ function Collect-CPU {
     $sec.pairs['Threads']      = $cpus[0].NumberOfLogicalProcessors
     $sec.pairs['Max clock (reported)'] = Format-GHz $cpus[0].MaxClockSpeed
     $sec.pairs['Socket']       = $cpus[0].SocketDesignation
-    if ($cpus[0].L2CacheSize) { $sec.pairs['L2 cache'] = Format-Bytes ([double]$cpus[0].L2CacheSize * 1KB) }
-    if ($cpus[0].L3CacheSize) { $sec.pairs['L3 cache'] = Format-Bytes ([double]$cpus[0].L3CacheSize * 1KB) }
+    if ($cpus[0].L2CacheSize) { $sec.pairs['L2 cache'] = Format-ByteSize ([double]$cpus[0].L2CacheSize * 1KB) }
+    if ($cpus[0].L3CacheSize) { $sec.pairs['L3 cache'] = Format-ByteSize ([double]$cpus[0].L3CacheSize * 1KB) }
     $vt = 'Disabled'; if ($cpus[0].VirtualizationFirmwareEnabled) { $vt = 'Enabled' }
     $sec.pairs['Virtualization (firmware)'] = $vt
     $slat = 'Disabled'; if ($cpus[0].SecondLevelAddressTranslationExtensions) { $slat = 'Enabled' }
@@ -476,7 +481,7 @@ function Collect-CPU {
             [ordered]@{ key = 'Max clock'; label = 'Max clock' }
             [ordered]@{ key = 'Socket'; label = 'Socket' }
         )
-        Add-SectionTable $sec 'All physical processors' $cols $rows
+        Add-SectionTable -Section $sec -Title 'All physical processors' -Columns $cols -Rows $rows
     }
 
     $sec.summary['CPU'] = $cpus[0].Name
@@ -486,8 +491,8 @@ function Collect-CPU {
     $sec.widgets['clock']   = Format-GHz $cpus[0].MaxClockSpeed
     $sec.widgets['l2']      = $null
     $sec.widgets['l3']      = $null
-    if ($cpus[0].L2CacheSize) { $sec.widgets['l2'] = Format-Bytes ([double]$cpus[0].L2CacheSize * 1KB) }
-    if ($cpus[0].L3CacheSize) { $sec.widgets['l3'] = Format-Bytes ([double]$cpus[0].L3CacheSize * 1KB) }
+    if ($cpus[0].L2CacheSize) { $sec.widgets['l2'] = Format-ByteSize ([double]$cpus[0].L2CacheSize * 1KB) }
+    if ($cpus[0].L3CacheSize) { $sec.widgets['l3'] = Format-ByteSize ([double]$cpus[0].L3CacheSize * 1KB) }
     $subParts = @()
     if ($cpus[0].NumberOfCores -and $cpus[0].NumberOfLogicalProcessors) {
         $subParts += ('{0} cores / {1} threads' -f $cpus[0].NumberOfCores, $cpus[0].NumberOfLogicalProcessors)
@@ -497,8 +502,8 @@ function Collect-CPU {
     return $sec
 }
 
-function Collect-Memory {
-    $sec = New-Section 'Memory'
+function Read-Memory {
+    $sec = ConvertTo-Section 'Memory'
     $os    = Invoke-Safe { Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop }
     $sticks = @(Invoke-Safe { Get-CimInstance -ClassName Win32_PhysicalMemory -ErrorAction Stop } @())
     $arr   = Invoke-Safe { Get-CimInstance -ClassName Win32_PhysicalMemoryArray -ErrorAction Stop }
@@ -509,15 +514,15 @@ function Collect-Memory {
         $usedB  = $totalB - $freeB
         $pct = 0.0
         if ($totalB -gt 0) { $pct = ($usedB / $totalB) * 100 }
-        $sec.pairs['Total (visible to Windows)'] = Format-Bytes $totalB
-        $sec.pairs['In use']  = ('{0} ({1:N1}%)' -f (Format-Bytes $usedB), $pct)
-        $sec.pairs['Free']    = Format-Bytes $freeB
+        $sec.pairs['Total (visible to Windows)'] = Format-ByteSize $totalB
+        $sec.pairs['In use']  = ('{0} ({1:N1}%)' -f (Format-ByteSize $usedB), $pct)
+        $sec.pairs['Free']    = Format-ByteSize $freeB
         $commitLimit = [double]$os.TotalVirtualMemorySize * 1KB
         $commitFree  = [double]$os.FreeVirtualMemory * 1KB
         if ($commitLimit -gt 0) {
-            $sec.pairs['Commit charge'] = ('{0} / {1}' -f (Format-Bytes ($commitLimit - $commitFree)), (Format-Bytes $commitLimit))
+            $sec.pairs['Commit charge'] = ('{0} / {1}' -f (Format-ByteSize ($commitLimit - $commitFree)), (Format-ByteSize $commitLimit))
         }
-        $sec.summary['Memory'] = '{0} ({1:N1}% in use)' -f (Format-Bytes $totalB), $pct
+        $sec.summary['Memory'] = '{0} ({1:N1}% in use)' -f (Format-ByteSize $totalB), $pct
         $sec.widgets['totalBytes'] = $totalB
         $sec.widgets['usedBytes']  = $usedB
         $sec.widgets['freeBytes']  = $freeB
@@ -541,7 +546,7 @@ function Collect-Memory {
             [ordered]@{ key = 'In use'; label = 'In use' }
             [ordered]@{ key = 'Peak usage'; label = 'Peak usage' }
         )
-        Add-SectionTable $sec 'Page file' $cols $pfRows
+        Add-SectionTable -Section $sec -Title 'Page file' -Columns $cols -Rows $pfRows
     }
 
     if ($arr) {
@@ -551,7 +556,7 @@ function Collect-Memory {
         if ($slots) { $sec.widgets['slots'] = $slots }
         if ($arr.MaxCapacityEx) {
             $maxB = [double]$arr.MaxCapacityEx * 1KB
-            if ($maxB -gt 0) { $sec.pairs['Max supported memory'] = Format-Bytes $maxB }
+            if ($maxB -gt 0) { $sec.pairs['Max supported memory'] = Format-ByteSize $maxB }
         }
     }
 
@@ -584,7 +589,7 @@ function Collect-Memory {
             $slot = "$($m.BankLabel) $($m.DeviceLocator)".Trim()
             $rows += [ordered]@{
                 'Slot'        = $slot
-                'Size'        = Format-Bytes $m.Capacity
+                'Size'        = Format-ByteSize $m.Capacity
                 'Speed'       = $speedStr
                 'Type'        = $type
                 'Form factor' = $ff
@@ -595,7 +600,7 @@ function Collect-Memory {
             }
             $stickWidgets += [ordered]@{
                 slot  = $slot
-                size  = Format-Bytes $m.Capacity
+                size  = Format-ByteSize $m.Capacity
                 speed = $speedStr
                 type  = $type
                 mfr   = ([string]$m.Manufacturer).Trim()
@@ -616,13 +621,13 @@ function Collect-Memory {
             [ordered]@{ key = 'Serial'; label = 'Serial' }
             [ordered]@{ key = 'Voltage'; label = 'Voltage' }
         )
-        Add-SectionTable $sec ('Memory modules ({0})' -f $sticks.Count) $cols $rows
+        Add-SectionTable -Section $sec -Title ('Memory modules ({0})' -f $sticks.Count) -Columns $cols -Rows $rows
     } else {
         [void]$sec.notes.Add('No memory module details available (SMBIOS data missing).')
     }
 
     $subParts = @()
-    if ($sec.widgets['totalBytes']) { $subParts += Format-Bytes $sec.widgets['totalBytes'] }
+    if ($sec.widgets['totalBytes']) { $subParts += Format-ByteSize $sec.widgets['totalBytes'] }
     if ($sec.widgets['usedPct']) { $subParts += ('{0:N1}% in use' -f $sec.widgets['usedPct']) }
     if ($sticks.Count -gt 0) { $subParts += (Format-CountPhrase $sticks.Count 'module') }
     if ($subParts.Count -gt 0) { $sec.subtitle = ($subParts -join ' / ') }
@@ -654,8 +659,8 @@ function Get-VramMap {
     return $map
 }
 
-function Collect-Graphics {
-    $sec = New-Section 'Graphics'
+function Read-GPU {
+    $sec = ConvertTo-Section 'Graphics'
     $vcs = @(Invoke-Safe { Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop } @())
     if ($vcs.Count -eq 0) {
         [void]$sec.notes.Add('No video controller information could be read from WMI.')
@@ -677,9 +682,9 @@ function Collect-Graphics {
             }
         }
         if ($vram) {
-            $vramText = Format-Bytes $vram
+            $vramText = Format-ByteSize $vram
         } elseif ($vc.AdapterRAM -and [double]$vc.AdapterRAM -gt 0) {
-            $vramText = (Format-Bytes ([double]$vc.AdapterRAM)) + ' (WMI value, capped at 4 GB)'
+            $vramText = (Format-ByteSize ([double]$vc.AdapterRAM)) + ' (WMI value, capped at 4 GB)'
             $usedCapped = $true
         }
 
@@ -717,7 +722,7 @@ function Collect-Graphics {
         [ordered]@{ key = 'Current mode'; label = 'Current mode' }
         [ordered]@{ key = 'Status'; label = 'Status' }
     )
-    Add-SectionTable $sec ('Adapters ({0})' -f $vcs.Count) $cols $rows
+    Add-SectionTable -Section $sec -Title ('Adapters ({0})' -f $vcs.Count) -Columns $cols -Rows $rows
 
     if ($usedCapped) {
         [void]$sec.notes.Add('At least one adapter reports its VRAM through the WMI 32-bit field, which is capped at 4 GB. The true size could not be read from the registry for that adapter.')
@@ -733,8 +738,8 @@ function Collect-Graphics {
     return $sec
 }
 
-function Collect-Displays {
-    $sec = New-Section 'Displays'
+function Read-Display {
+    $sec = ConvertTo-Section 'Displays'
     $mons  = @(Invoke-Safe { Get-CimInstance -Namespace 'root\wmi' -ClassName WmiMonitorID -ErrorAction Stop } @())
     $basic = @(Invoke-Safe { Get-CimInstance -Namespace 'root\wmi' -ClassName WmiMonitorBasicDisplayParams -ErrorAction Stop } @())
     $bright = @(Invoke-Safe { Get-CimInstance -Namespace 'root\wmi' -ClassName WmiMonitorBrightness -ErrorAction Stop } @())
@@ -809,7 +814,7 @@ function Collect-Displays {
         [ordered]@{ key = 'Brightness'; label = 'Brightness' }
         [ordered]@{ key = 'Manufactured'; label = 'Manufactured' }
     )
-    Add-SectionTable $sec ('Detected monitors ({0})' -f $mons.Count) $cols $rows
+    Add-SectionTable -Section $sec -Title ('Detected monitors ({0})' -f $mons.Count) -Columns $cols -Rows $rows
     $sec.summary['Displays'] = [string]$mons.Count
     $subParts = @()
     if ($monWidgets.Count -gt 0) {
@@ -821,8 +826,8 @@ function Collect-Displays {
     return $sec
 }
 
-function Collect-Storage {
-    $sec = New-Section 'Storage'
+function Read-Storage {
+    $sec = ConvertTo-Section 'Storage'
     $disks = @(Invoke-Safe { Get-PhysicalDisk -ErrorAction Stop } @())
     $diskRows = @()
     $diskWidgets = @()
@@ -836,17 +841,17 @@ function Collect-Storage {
             $media = [string]$d.MediaType
             if ($media -eq 'Unspecified' -and [string]$d.BusType -match 'NVMe') { $media = 'SSD (NVMe)' }
             $temp = $null; $wear = $null; $hours = $null
-            $tempNum = $null; $wearNum = $null; $hoursNum = $null
+            $tempNum = $null; $wearNum = $null
             if ($rel) {
                 if ($rel.Temperature -and [int]$rel.Temperature -gt 0) { $temp = '{0} C' -f $rel.Temperature; $tempNum = [int]$rel.Temperature }
                 if ($null -ne $rel.Wear -and [int]$rel.Wear -ge 0) { $wear = '{0} %' -f $rel.Wear; $wearNum = [int]$rel.Wear }
-                if ($rel.PowerOnHours -and [int]$rel.PowerOnHours -gt 0) { $hours = [string]$rel.PowerOnHours; $hoursNum = [int]$rel.PowerOnHours }
+                if ($rel.PowerOnHours -and [int]$rel.PowerOnHours -gt 0) { $hours = [string]$rel.PowerOnHours }
             }
             $diskRows += [ordered]@{
                 'Disk'           = $d.FriendlyName
                 'Type'           = $media
                 'Bus'            = [string]$d.BusType
-                'Size'           = Format-Bytes $d.Size
+                'Size'           = Format-ByteSize $d.Size
                 'Health'         = [string]$d.HealthStatus
                 'Temperature'    = $temp
                 'Wear'           = $wear
@@ -858,7 +863,7 @@ function Collect-Storage {
                 name    = $d.FriendlyName
                 type    = $media
                 bus     = [string]$d.BusType
-                size    = Format-Bytes $d.Size
+                size    = Format-ByteSize $d.Size
                 health  = [string]$d.HealthStatus
                 temp    = $temp
                 tempNum = $tempNum
@@ -875,7 +880,7 @@ function Collect-Storage {
                 'Disk'           = $d.Model
                 'Type'           = $d.MediaType
                 'Bus'            = $d.InterfaceType
-                'Size'           = Format-Bytes $d.Size
+                'Size'           = Format-ByteSize $d.Size
                 'Health'         = $d.Status
                 'Temperature'    = $null
                 'Wear'           = $null
@@ -899,7 +904,7 @@ function Collect-Storage {
             [ordered]@{ key = 'Firmware'; label = 'Firmware' }
             [ordered]@{ key = 'Serial'; label = 'Serial' }
         )
-        Add-SectionTable $sec ('Physical disks ({0})' -f $diskRows.Count) $cols $diskRows
+        Add-SectionTable -Section $sec -Title ('Physical disks ({0})' -f $diskRows.Count) -Columns $cols -Rows $diskRows
     }
 
     # Disk number -> friendly name (for volume mapping), requires elevation on most systems.
@@ -957,14 +962,14 @@ function Collect-Storage {
             if ($diskNameById.ContainsKey($dn)) { $diskName = $diskNameById[$dn] }
         }
         $freeText = $null
-        if ($v.Size -gt 0) { $freeText = ('{0} ({1})' -f (Format-Bytes $v.Free), $freePctText) }
-        else { $freeText = Format-Bytes $v.Free }
+        if ($v.Size -gt 0) { $freeText = ('{0} ({1})' -f (Format-ByteSize $v.Free), $freePctText) }
+        else { $freeText = Format-ByteSize $v.Free }
         $volRows += [ordered]@{
             'Drive'       = ('{0}:' -f $v.Letter)
             'Label'       = $v.Label
             'File system' = $v.FS
             'Type'        = $v.Type
-            'Size'        = Format-Bytes $v.Size
+            'Size'        = Format-ByteSize $v.Size
             'Free'        = $freeText
             'Health'      = $v.Health
             'Physical disk' = $diskName
@@ -992,7 +997,7 @@ function Collect-Storage {
             [ordered]@{ key = 'Health'; label = 'Health' }
             [ordered]@{ key = 'Physical disk'; label = 'Physical disk' }
         )
-        Add-SectionTable $sec ('Volumes ({0})' -f $volRows.Count) $cols $volRows
+        Add-SectionTable -Section $sec -Title ('Volumes ({0})' -f $volRows.Count) -Columns $cols -Rows $volRows
     }
 
     $partRows = @()
@@ -1006,7 +1011,7 @@ function Collect-Storage {
             'Disk'      = 'Disk {0}' -f $p.DiskIndex
             'Partition' = $p.Index
             'Type'      = $p.Type
-            'Size'      = Format-Bytes $p.Size
+            'Size'      = Format-ByteSize $p.Size
             'Flags'     = ($flags -join ', ')
         }
     }
@@ -1018,12 +1023,12 @@ function Collect-Storage {
             [ordered]@{ key = 'Size'; label = 'Size' }
             [ordered]@{ key = 'Flags'; label = 'Flags' }
         )
-        Add-SectionTable $sec ('Partitions ({0})' -f $partRows.Count) $cols $partRows
+        Add-SectionTable -Section $sec -Title ('Partitions ({0})' -f $partRows.Count) -Columns $cols -Rows $partRows
     }
 
     $storageSummary = $null
     if ($totalSize -gt 0) {
-        $storageSummary = '{0} total, {1} free' -f (Format-Bytes $totalSize), (Format-Bytes $totalFree)
+        $storageSummary = '{0} total, {1} free' -f (Format-ByteSize $totalSize), (Format-ByteSize $totalFree)
     }
     $sec.summary['Storage'] = $storageSummary
     $sec.widgets['disks'] = $diskWidgets
@@ -1044,8 +1049,8 @@ function Collect-Storage {
     return $sec
 }
 
-function Collect-Network {
-    $sec = New-Section 'Network'
+function Read-Network {
+    $sec = ConvertTo-Section 'Network'
     $cfgs = @(Invoke-Safe { Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -ErrorAction Stop } @())
     $cfgByIndex = @{}
     foreach ($c in $cfgs) { $cfgByIndex[[int]$c.Index] = $c }
@@ -1066,11 +1071,10 @@ function Collect-Network {
         $cfg = $null
         if ($cfgByIndex.ContainsKey([int]$a.Index)) { $cfg = $cfgByIndex[[int]$a.Index] }
 
-        $ipv4 = $null; $ipv6 = $null; $subnet = $null; $gw = $null; $dns = $null; $dhcp = $null; $dhcpSrv = $null
+        $ipv4 = $null; $subnet = $null; $gw = $null; $dns = $null; $dhcp = $null
         if ($cfg) {
             if ($cfg.IPAddress) {
                 $ipv4 = @($cfg.IPAddress) | Where-Object { $_ -match '^\d{1,3}\.' -and $_ -notmatch '^169\.254\.' } | Select-Object -First 1
-                $ipv6 = @($cfg.IPAddress) | Where-Object { $_ -match ':' -and $_ -notmatch '^fe80' } | Select-Object -First 1
             }
             if ($cfg.IPSubnet) {
                 $subnet = @($cfg.IPSubnet) | Where-Object { $_ -match '^\d{1,3}\.' } | Select-Object -First 1
@@ -1147,7 +1151,7 @@ function Collect-Network {
         [ordered]@{ key = 'DHCP'; label = 'DHCP' }
         [ordered]@{ key = 'Adapter'; label = 'Adapter' }
     )
-    Add-SectionTable $sec ('Adapters ({0})' -f $rows.Count) $cols $rows
+    Add-SectionTable -Section $sec -Title ('Adapters ({0})' -f $rows.Count) -Columns $cols -Rows $rows
 
     # Wi-Fi details via netsh (works without elevation in most cases).
     $wl = Invoke-Safe { netsh wlan show interfaces }
@@ -1180,8 +1184,8 @@ function Collect-Network {
     return $sec
 }
 
-function Collect-Audio {
-    $sec = New-Section 'Audio'
+function Read-Audio {
+    $sec = ConvertTo-Section 'Audio'
     $devs = @(Invoke-Safe { Get-CimInstance -ClassName Win32_SoundDevice -ErrorAction Stop } @())
     $rows = @()
     foreach ($d in $devs) {
@@ -1197,7 +1201,7 @@ function Collect-Audio {
             [ordered]@{ key = 'Manufacturer'; label = 'Manufacturer' }
             [ordered]@{ key = 'Status'; label = 'Status' }
         )
-        Add-SectionTable $sec ('Sound devices ({0})' -f $rows.Count) $cols $rows
+        Add-SectionTable -Section $sec -Title ('Sound devices ({0})' -f $rows.Count) -Columns $cols -Rows $rows
     }
 
     $endpoints = @(Invoke-Safe { Get-CimInstance -ClassName Win32_PnPEntity -Filter "PNPClass='AudioEndpoint'" -ErrorAction Stop } @())
@@ -1215,7 +1219,7 @@ function Collect-Audio {
             [ordered]@{ key = 'Manufacturer'; label = 'Manufacturer' }
             [ordered]@{ key = 'Status'; label = 'Status' }
         )
-        Add-SectionTable $sec ('Audio endpoints ({0})' -f $epRows.Count) $cols $epRows
+        Add-SectionTable -Section $sec -Title ('Audio endpoints ({0})' -f $epRows.Count) -Columns $cols -Rows $epRows
     }
 
     if ($rows.Count -eq 0 -and $epRows.Count -eq 0) {
@@ -1228,8 +1232,8 @@ function Collect-Audio {
     return $sec
 }
 
-function Collect-Battery {
-    $sec = New-Section 'Battery'
+function Read-Battery {
+    $sec = ConvertTo-Section 'Battery'
     $bats = @(Invoke-Safe { Get-CimInstance -ClassName Win32_Battery -ErrorAction Stop } @())
     $designed = Invoke-Safe { Get-CimInstance -Namespace 'root\wmi' -ClassName BatteryStaticData -ErrorAction Stop }
     $fullCap  = Invoke-Safe { Get-CimInstance -Namespace 'root\wmi' -ClassName BatteryFullChargedCapacity -ErrorAction Stop }
@@ -1300,8 +1304,8 @@ function Collect-Battery {
     return $sec
 }
 
-function Collect-Security {
-    $sec = New-Section 'Security'
+function Read-Security {
+    $sec = ConvertTo-Section 'Security'
 
     # TPM
     $tpm = Invoke-Safe { Get-CimInstance -Namespace 'root\cimv2\security\microsofttpm' -ClassName Win32_Tpm -ErrorAction Stop }
@@ -1377,7 +1381,7 @@ function Collect-Security {
             [ordered]@{ key = 'State'; label = 'State' }
             [ordered]@{ key = 'Path'; label = 'Executable' }
         )
-        Add-SectionTable $sec ('Registered security products ({0})' -f $avRows.Count) $cols $avRows
+        Add-SectionTable -Section $sec -Title ('Registered security products ({0})' -f $avRows.Count) -Columns $cols -Rows $avRows
     }
 
     # Firewall
@@ -1400,7 +1404,7 @@ function Collect-Security {
             [ordered]@{ key = 'Inbound'; label = 'Inbound default' }
             [ordered]@{ key = 'Outbound'; label = 'Outbound default' }
         )
-        Add-SectionTable $sec 'Windows Firewall' $cols $fwRows
+        Add-SectionTable -Section $sec -Title 'Windows Firewall' -Columns $cols -Rows $fwRows
         $fwOn = @($fw | Where-Object { $_.Enabled }).Count
         $fwAllOn = ($fwOn -eq $fw.Count)
         $sec.pairs['Firewall'] = '{0} of {1} profiles enabled' -f $fwOn, $fw.Count
@@ -1429,7 +1433,7 @@ function Collect-Security {
             [ordered]@{ key = 'Encryption'; label = 'Encrypted' }
             [ordered]@{ key = 'Method'; label = 'Method' }
         )
-        Add-SectionTable $sec 'BitLocker volumes' $cols $blRows
+        Add-SectionTable -Section $sec -Title 'BitLocker volumes' -Columns $cols -Rows $blRows
     } elseif (-not $Script:IsAdmin) {
         [void]$sec.notes.Add('BitLocker volume status requires running SpecsScanner as Administrator.')
     }
@@ -1485,8 +1489,8 @@ function Collect-Security {
     return $sec
 }
 
-function Collect-Windows {
-    $sec = New-Section 'Windows'
+function Read-Windows {
+    $sec = ConvertTo-Section 'Windows'
     $os = Invoke-Safe { Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop }
     $cv = Invoke-Safe { Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction Stop }
 
@@ -1577,7 +1581,7 @@ function Collect-Windows {
             [ordered]@{ key = 'Description'; label = 'Description' }
             [ordered]@{ key = 'Installed'; label = 'Installed' }
         )
-        Add-SectionTable $sec 'Latest updates (8 most recent)' $cols $uRows
+        Add-SectionTable -Section $sec -Title 'Latest updates (8 most recent)' -Columns $cols -Rows $uRows
     }
 
     if ($os) {
@@ -1596,8 +1600,8 @@ function Collect-Windows {
     return $sec
 }
 
-function Collect-Peripherals {
-    $sec = New-Section 'Peripherals'
+function Read-Peripheral {
+    $sec = ConvertTo-Section 'Peripherals'
 
     # PnP devices (prefer Get-PnpDevice, fall back to WMI).
     $devices = @(Invoke-Safe { Get-PnpDevice -PresentOnly -ErrorAction Stop } @())
@@ -1621,7 +1625,7 @@ function Collect-Peripherals {
             [ordered]@{ key = 'Device class'; label = 'Device class' }
             [ordered]@{ key = 'Count'; label = 'Count' }
         )
-        Add-SectionTable $sec ('Devices by class ({0} total)' -f $devices.Count) $cols $classRows
+        Add-SectionTable -Section $sec -Title ('Devices by class ({0} total)' -f $devices.Count) -Columns $cols -Rows $classRows
 
         $interesting = @('Keyboard', 'Mouse', 'USB', 'HIDClass', 'Camera', 'Image', 'Media', 'Bluetooth', 'Biometric', 'SmartCard', 'Monitor')
         $notable = @($devices | Where-Object { $_.Class -in $interesting -and $_.FriendlyName })
@@ -1641,7 +1645,7 @@ function Collect-Peripherals {
                 [ordered]@{ key = 'Status'; label = 'Status' }
                 [ordered]@{ key = 'Manufacturer'; label = 'Manufacturer' }
             )
-            Add-SectionTable $sec 'Keyboards, mice, USB, cameras, Bluetooth' $cols $notableRows
+            Add-SectionTable -Section $sec -Title 'Keyboards, mice, USB, cameras, Bluetooth' -Columns $cols -Rows $notableRows
         }
     }
 
@@ -1656,7 +1660,7 @@ function Collect-Peripherals {
             [ordered]@{ key = 'USB controller'; label = 'USB controller' }
             [ordered]@{ key = 'Status'; label = 'Status' }
         )
-        Add-SectionTable $sec ('USB controllers ({0})' -f $rows.Count) $cols $rows
+        Add-SectionTable -Section $sec -Title ('USB controllers ({0})' -f $rows.Count) -Columns $cols -Rows $rows
     }
 
     # Printers
@@ -1684,7 +1688,7 @@ function Collect-Peripherals {
             [ordered]@{ key = 'Shared'; label = 'Shared' }
             [ordered]@{ key = 'Network'; label = 'Network' }
         )
-        Add-SectionTable $sec ('Printers ({0})' -f $rows.Count) $cols $rows
+        Add-SectionTable -Section $sec -Title ('Printers ({0})' -f $rows.Count) -Columns $cols -Rows $rows
     }
 
     $sec.widgets['total'] = $devices.Count
@@ -1692,8 +1696,8 @@ function Collect-Peripherals {
     return $sec
 }
 
-function Collect-Software {
-    $sec = New-Section 'Installed Software'
+function Read-Software {
+    $sec = ConvertTo-Section 'Installed Software'
     $paths = @(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
@@ -1738,14 +1742,14 @@ function Collect-Software {
         [ordered]@{ key = 'Publisher'; label = 'Publisher' }
         [ordered]@{ key = 'Install date'; label = 'Install date' }
     )
-    Add-SectionTable $sec ('Applications ({0})' -f $rows.Count) $cols $rows
+    Add-SectionTable -Section $sec -Title ('Applications ({0})' -f $rows.Count) -Columns $cols -Rows $rows
     $sec.widgets['count'] = $apps.Count
     $sec.subtitle = ('{0} applications installed' -f $apps.Count)
     return $sec
 }
 
-function Collect-Services {
-    $sec = New-Section 'Services'
+function Read-Service {
+    $sec = ConvertTo-Section 'Services'
     $svcs = @(Invoke-Safe { Get-CimInstance -ClassName Win32_Service -Filter "State='Running'" -ErrorAction Stop } @())
     if ($svcs.Count -eq 0) {
         [void]$sec.notes.Add('No running services could be enumerated.')
@@ -1771,7 +1775,7 @@ function Collect-Services {
         [ordered]@{ key = 'Account'; label = 'Account' }
         [ordered]@{ key = 'Process ID'; label = 'PID' }
     )
-    Add-SectionTable $sec ('Running services ({0})' -f $rows.Count) $cols $rows
+    Add-SectionTable -Section $sec -Title ('Running services ({0})' -f $rows.Count) -Columns $cols -Rows $rows
     $sec.widgets['count'] = $rows.Count
     $sec.subtitle = ('{0} running' -f $rows.Count)
     return $sec
@@ -2690,7 +2694,7 @@ function ConvertTo-HtmlDataTable {
     return $sb.ToString()
 }
 
-function ConvertTo-HtmlWidgets {
+function ConvertTo-HtmlWidget {
     # Visual summary row rendered above a section's tables.
     param([string]$Key, $Section)
     $w = $Section.widgets
@@ -2724,8 +2728,8 @@ function ConvertTo-HtmlWidgets {
                 $tone = 'var(--fg-ok)'
                 if ($pct -ge 90) { $tone = 'var(--fg-bad)' }
                 elseif ($pct -ge 75) { $tone = 'var(--fg-warn)' }
-                $freeText = Format-Bytes $w['freeBytes']
-                $totalText = Format-Bytes $w['totalBytes']
+                $freeText = Format-ByteSize $w['freeBytes']
+                $totalText = Format-ByteSize $w['totalBytes']
                 $ring = ConvertTo-HtmlRing -Pct ([double]$pct) -CenterText ('{0:N1}%' -f [double]$pct) -ToneVar $tone -AriaLabel ('{0:N1} percent of memory in use' -f [double]$pct)
                 $row += ('<div class="stat" style="display:flex;gap:14px;align-items:center;grid-column:1/-1">{0}<div><div class="slabel">Memory in use</div><div class="svalue">{1:N1}%</div><div class="ssub">{2} free of {3}</div></div></div>' -f $ring, [double]$pct, (ConvertTo-HtmlValue $freeText), (ConvertTo-HtmlValue $totalText))
             }
@@ -2801,8 +2805,8 @@ function ConvertTo-HtmlWidgets {
                 $subBits = @()
                 if ($v.fs) { $subBits += [string]$v.fs }
                 if ($v.type) { $subBits += [string]$v.type }
-                $freeText = Format-Bytes $v.free
-                $sizeText = Format-Bytes $v.size
+                $freeText = Format-ByteSize $v.free
+                $sizeText = Format-ByteSize $v.size
                 $barHtml = ConvertTo-HtmlBar -Pct ([double]$v.freePct) -ToneVar (Get-ToneVar $vtone) -AriaLabel ('{0:N1} percent free' -f [double]$v.freePct)
                 $row += ('<div class="vcard"><div class="dchead"><span class="dcicon">{0}</span><div style="min-width:0"><div class="dcname">{1}</div><div class="dcsize">{2}</div></div></div><div class="barline">{3}<div class="barlegend"><span>{4} free of {5}</span><span>{6:N1}%</span></div></div></div>' -f (Get-SsIcon 'disk'), (ConvertTo-HtmlText $nameText), (ConvertTo-HtmlText ($subBits -join ' / ')), $barHtml, (ConvertTo-HtmlValue $freeText), (ConvertTo-HtmlValue $sizeText), [double]$v.freePct)
             }
@@ -2913,14 +2917,14 @@ function ConvertTo-HtmlWidgets {
 }
 
 function ConvertTo-HtmlSection {
-    param([string]$Key, $Section, [int]$Index)
+    param([string]$Key, $Section)
     $iconName = 'info'
     $accent = 'lavender'
     if ($Script:SectionMeta.Contains($Key)) {
         $iconName = $Script:SectionMeta[$Key].icon
         $accent = $Script:SectionMeta[$Key].accent
     }
-    $body = ConvertTo-HtmlWidgets -Key $Key -Section $Section
+    $body = ConvertTo-HtmlWidget -Key $Key -Section $Section
     foreach ($n in $Section.notes) {
         $body += ('<div class="note"><span class="ni">{0}</span><span>{1}</span></div>' -f (Get-SsIcon 'info'), (ConvertTo-HtmlText ([string]$n)))
     }
@@ -2957,7 +2961,7 @@ function Get-DeviceType {
     return 'PC'
 }
 
-function Build-AutoSummary {
+function ConvertTo-SummaryText {
     # One plain-language paragraph any reader can understand.
     param($Data)
     $out = New-Object System.Collections.ArrayList
@@ -2971,7 +2975,7 @@ function Build-AutoSummary {
         $memSource = $null
         if ($mw0['installedBytes']) { $memSource = $mw0['installedBytes'] }
         elseif ($mw0['totalBytes']) { $memSource = $mw0['totalBytes'] }
-        if ($memSource) { $memText = Format-Bytes $memSource }
+        if ($memSource) { $memText = Format-ByteSize $memSource }
     }
     if ($memText) { $s1 += (' with {0} of RAM' -f $memText) }
     $cpuName = $null
@@ -2987,7 +2991,7 @@ function Build-AutoSummary {
         if ($disks.Count -gt 0 -and $sw['totalBytes']) {
             $diskWord = 'disks'
             if ($disks.Count -eq 1) { $diskWord = 'disk' }
-            [void]$out.Add(('Storage: {0} physical {1}, {2} total with {3} free.' -f $disks.Count, $diskWord, (Format-Bytes $sw['totalBytes']), (Format-Bytes $sw['freeBytes'])))
+            [void]$out.Add(('Storage: {0} physical {1}, {2} total with {3} free.' -f $disks.Count, $diskWord, (Format-ByteSize $sw['totalBytes']), (Format-ByteSize $sw['freeBytes'])))
             $healthy = @($disks | Where-Object { ([string]$_.health) -match '(?i)healthy|^ok' }).Count
             if ($healthy -eq $disks.Count) { [void]$out.Add('All disks report healthy.') }
             elseif ($healthy -gt 0) { [void]$out.Add(('{0} of {1} disks report healthy; see Storage for details.' -f $healthy, $disks.Count)) }
@@ -3013,11 +3017,11 @@ function Build-AutoSummary {
     return ($out -join ' ')
 }
 
-function Build-HtmlHero {
+function ConvertTo-HtmlHero {
     param($Data, $Meta)
 
     $devType = Get-DeviceType $Data['System']
-    $summaryText = Build-AutoSummary -Data $Data
+    $summaryText = ConvertTo-SummaryText -Data $Data
 
     $rows = ''
     $os = $null
@@ -3061,10 +3065,10 @@ function Build-HtmlHero {
             elseif ([double]$mw['usedPct'] -ge 75) { $mtone = 'var(--fg-warn)' }
             $memRing = ConvertTo-HtmlRing -Pct ([double]$mw['usedPct']) -CenterText ('{0:N0}%' -f [double]$mw['usedPct']) -ToneVar $mtone -AriaLabel ('{0} percent of memory in use' -f [double]$mw['usedPct'])
         }
-        $memVal = Format-Bytes $mw['totalBytes']
-        if ($mw['installedBytes']) { $memVal = Format-Bytes $mw['installedBytes'] }
+        $memVal = Format-ByteSize $mw['totalBytes']
+        if ($mw['installedBytes']) { $memVal = Format-ByteSize $mw['installedBytes'] }
         $bits = @()
-        if ($mw['freeBytes']) { $bits += ((Format-Bytes $mw['freeBytes']) + ' free') }
+        if ($mw['freeBytes']) { $bits += ((Format-ByteSize $mw['freeBytes']) + ' free') }
         $stickCount = @($mw['sticks']).Count
         if ($stickCount -gt 0) {
             $moduleWord = 'modules'
@@ -3098,7 +3102,7 @@ function Build-HtmlHero {
     $stBar = ''
     if ($Data.Contains('Storage')) {
         $sw = $Data['Storage'].widgets
-        $stVal = Format-Bytes $sw['totalBytes']
+        $stVal = Format-ByteSize $sw['totalBytes']
         $disks = @($sw['disks'])
         $bits = @()
         if ($disks.Count -gt 0) {
@@ -3106,7 +3110,7 @@ function Build-HtmlHero {
             if ($disks.Count -eq 1) { $diskWord = 'disk' }
             $bits += ('{0} {1}' -f $disks.Count, $diskWord)
         }
-        if ($sw['freeBytes']) { $bits += ((Format-Bytes $sw['freeBytes']) + ' free') }
+        if ($sw['freeBytes']) { $bits += ((Format-ByteSize $sw['freeBytes']) + ' free') }
         $stSub = ($bits -join ' / ')
         if ($sw['totalBytes'] -and [double]$sw['totalBytes'] -gt 0) {
             $usedPct = [Math]::Round(((($sw['totalBytes'] - $sw['freeBytes']) / $sw['totalBytes']) * 100), 1)
@@ -3156,7 +3160,7 @@ function Build-HtmlHero {
     return ($hero + ('<div class="kpis">{0}</div>' -f $kpis) + $health + '</section>')
 }
 
-function Build-HtmlReport {
+function ConvertTo-HtmlReport {
     param($Data, $Meta, $Order)
 
     $nav = ''
@@ -3165,12 +3169,12 @@ function Build-HtmlReport {
     foreach ($key in $Order) {
         if (-not $Data.Contains($key)) { continue }
         $sec = $Data[$key]
-        $sections += (ConvertTo-HtmlSection -Key $key -Section $sec -Index $i)
+        $sections += (ConvertTo-HtmlSection -Key $key -Section $sec)
         $nav += ('<a href="#sec-{0}">{1}</a>' -f $key.ToLowerInvariant(), (ConvertTo-HtmlText $sec.title))
         $i++
     }
 
-    $hero = Build-HtmlHero -Data $Data -Meta $Meta
+    $hero = ConvertTo-HtmlHero -Data $Data -Meta $Meta
 
     $banner = ''
     if (-not $Meta.IsAdmin -or $Script:Warnings.Count -gt 0) {
@@ -3251,7 +3255,7 @@ function Build-HtmlReport {
 # ---------------------------------------------------------------------------
 # Redaction (-Redact): replace identifiers with share-safe placeholders
 # ---------------------------------------------------------------------------
-function Convert-RedactedValue {
+function ConvertTo-RedactedValue {
     param($Value, [string]$KeyName, $State)
     if ($null -eq $Value) { return $Value }
     if ($Value -is [bool]) { return $Value }
@@ -3328,33 +3332,33 @@ function Invoke-DataRedaction {
     foreach ($key in @($Data.Keys)) {
         $sec = $Data[$key]
         if ($sec.Contains('subtitle') -and $sec['subtitle']) {
-            $sec['subtitle'] = Convert-RedactedValue -Value $sec['subtitle'] -KeyName '' -State $state
+            $sec['subtitle'] = ConvertTo-RedactedValue -Value $sec['subtitle'] -KeyName '' -State $state
         }
         foreach ($pk in @($sec.pairs.Keys)) {
-            $sec.pairs[$pk] = Convert-RedactedValue -Value $sec.pairs[$pk] -KeyName ([string]$pk) -State $state
+            $sec.pairs[$pk] = ConvertTo-RedactedValue -Value $sec.pairs[$pk] -KeyName ([string]$pk) -State $state
         }
         foreach ($t in @($sec.tables)) {
             foreach ($row in @($t.rows)) {
                 foreach ($ck in @($row.Keys)) {
-                    $row[$ck] = Convert-RedactedValue -Value $row[$ck] -KeyName ([string]$ck) -State $state
+                    $row[$ck] = ConvertTo-RedactedValue -Value $row[$ck] -KeyName ([string]$ck) -State $state
                 }
             }
         }
         for ($i = 0; $i -lt $sec.notes.Count; $i++) {
             if ($sec.notes[$i] -is [string]) {
-                $sec.notes[$i] = Convert-RedactedValue -Value $sec.notes[$i] -KeyName '' -State $state
+                $sec.notes[$i] = ConvertTo-RedactedValue -Value $sec.notes[$i] -KeyName '' -State $state
             }
         }
         if ($sec.widgets) {
             foreach ($wk in @($sec.widgets.Keys)) {
                 $wv = $sec.widgets[$wk]
                 if ($wv -is [string]) {
-                    $sec.widgets[$wk] = Convert-RedactedValue -Value $wv -KeyName ([string]$wk) -State $state
+                    $sec.widgets[$wk] = ConvertTo-RedactedValue -Value $wv -KeyName ([string]$wk) -State $state
                 } elseif ($null -ne $wv -and ($wv -is [System.Collections.IEnumerable]) -and ($wv -isnot [string])) {
                     foreach ($item in @($wv)) {
                         if ($item -is [System.Collections.IDictionary]) {
                             foreach ($ik in @($item.Keys)) {
-                                $item[$ik] = Convert-RedactedValue -Value $item[$ik] -KeyName ([string]$ik) -State $state
+                                $item[$ik] = ConvertTo-RedactedValue -Value $item[$ik] -KeyName ([string]$ik) -State $state
                             }
                         }
                     }
@@ -3362,7 +3366,7 @@ function Invoke-DataRedaction {
             }
         }
         foreach ($sk in @($sec.summary.Keys)) {
-            $sec.summary[$sk] = Convert-RedactedValue -Value $sec.summary[$sk] -KeyName ([string]$sk) -State $state
+            $sec.summary[$sk] = ConvertTo-RedactedValue -Value $sec.summary[$sk] -KeyName ([string]$sk) -State $state
         }
     }
     $Meta['Hostname'] = 'DESKTOP-EXAMPLE'
@@ -3370,6 +3374,9 @@ function Invoke-DataRedaction {
     $Meta['Redacted'] = $true
 }
 
+# ---------------------------------------------------------------------------
+# JSON output
+# ---------------------------------------------------------------------------
 function ConvertTo-SpecsJson {
     param($Data, $Meta, $Order)
     $out = [ordered]@{}
@@ -3445,20 +3452,20 @@ if ($Sections -and @($Sections).Count -gt 0) {
 $orderedKeys = @($Script:SectionTitles.Keys | Where-Object { $enabledList.Contains($_) })
 
 $collectorMap = @{
-    System      = { Collect-System }
-    CPU         = { Collect-CPU }
-    Memory      = { Collect-Memory }
-    Graphics    = { Collect-Graphics }
-    Displays    = { Collect-Displays }
-    Storage     = { Collect-Storage }
-    Network     = { Collect-Network }
-    Audio       = { Collect-Audio }
-    Battery     = { Collect-Battery }
-    Security    = { Collect-Security }
-    Windows     = { Collect-Windows }
-    Peripherals = { Collect-Peripherals }
-    Software    = { Collect-Software }
-    Services    = { Collect-Services }
+    System      = { Read-System }
+    CPU         = { Read-CPU }
+    Memory      = { Read-Memory }
+    Graphics    = { Read-GPU }
+    Displays    = { Read-Display }
+    Storage     = { Read-Storage }
+    Network     = { Read-Network }
+    Audio       = { Read-Audio }
+    Battery     = { Read-Battery }
+    Security    = { Read-Security }
+    Windows     = { Read-Windows }
+    Peripherals = { Read-Peripheral }
+    Software    = { Read-Software }
+    Services    = { Read-Service }
 }
 
 $data = [ordered]@{}
@@ -3498,11 +3505,11 @@ if ($Redact) {
     Write-Host '  Redaction: hostname, user names, serials, MACs and IPs replaced with placeholders' -ForegroundColor DarkYellow
 }
 
-$paths = Get-OutputPaths -Path $OutputPath -Stamp $stamp
+$paths = Resolve-OutputPath -Path $OutputPath -Stamp $stamp
 $written = New-Object System.Collections.ArrayList
 
 if ($Format -eq 'Html' -or $Format -eq 'Both') {
-    $html = Build-HtmlReport -Data $data -Meta $meta -Order $orderedKeys
+    $html = ConvertTo-HtmlReport -Data $data -Meta $meta -Order $orderedKeys
     Write-TextFile -Path $paths.html -Content $html
     [void]$written.Add($paths.html)
 }
@@ -3516,7 +3523,7 @@ Write-Host ''
 foreach ($f in $written) {
     $sizeText = ''
     if ([System.IO.File]::Exists($f)) {
-        $sizeText = ' ({0})' -f (Format-Bytes ([System.IO.FileInfo]$f).Length)
+        $sizeText = ' ({0})' -f (Format-ByteSize ([System.IO.FileInfo]$f).Length)
     }
     Write-Host ('  [OK] {0}{1}' -f $f, $sizeText) -ForegroundColor Green
 }
