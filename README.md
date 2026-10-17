@@ -65,7 +65,7 @@ The scan takes a few seconds, writes `SpecsScanner-<hostname>-<timestamp>.html` 
 
 Every report is a single self-contained HTML file - styles, icons and JavaScript inlined, zero network requests. What you get:
 
-- **Overview dashboard** - hostname, device type, an auto-written plain-language summary, KPI tiles (CPU, memory ring, GPU, storage bar) and a system-health strip.
+- **Overview dashboard** - hostname, device type, Windows install date, an auto-written plain-language summary, KPI tiles (CPU, memory ring, GPU, storage bar) and a system-health strip.
 - **Search everything** - press `/` (or click the search box) to filter tables live; `Esc` clears it.
 - **Sortable tables** - click any column header; numeric, version and date columns sort correctly. Keyboard accessible.
 - **Click to copy** - serial numbers, MACs, IPs and identifiers copy to the clipboard with one click.
@@ -88,7 +88,7 @@ Every report is a single self-contained HTML file - styles, icons and JavaScript
 | Audio               | Sound devices and audio endpoints                                                                                               |
 | Battery             | Charge, status, chemistry, design vs full-charge capacity, health %, cycle count (laptops - section auto-hides on desktops)     |
 | Security            | TPM presence/spec/state, firmware mode, Secure Boot, Defender + tamper protection, firewall profiles, registered AV products, BitLocker volumes      |
-| Windows             | Edition, version + UBR build, feature update, install date, uptime, activation, timezone, locale, .NET, recent update history   |
+| Windows             | Edition, version + UBR build, feature update, install date, last update installed, uptime, activation, timezone, locale, .NET, recent update history   |
 | Peripherals         | Device counts by class, keyboards/mice/USB/cameras/Bluetooth, USB controllers, printers                                        |
 | Installed Software  | Every registry uninstall entry: name, version, publisher, install date (deduplicated)                                          |
 | Services            | Running Windows services with start mode and account                                                                           |
@@ -109,7 +109,7 @@ For 100% coverage: right-click PowerShell -> **Run as administrator**, then scan
 
 ```json
 {
-  "scanner": { "name": "SpecsScanner", "version": "2.0.1", "elevated": true },
+  "scanner": { "name": "SpecsScanner", "version": "2.1.0", "elevated": true },
   "CPU": { "title": "Processor", "values": { "Name": "AMD Ryzen 5 5600G", "Cores": 6, "...": "..." }, "tables": [ ] },
   "...": { }
 }

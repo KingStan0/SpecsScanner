@@ -80,7 +80,7 @@ $ErrorActionPreference = 'Continue'
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-$Script:Version   = '2.0.1'
+$Script:Version   = '2.1.0'
 $Script:IsAdmin   = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Script:RedactMode = [bool]$Redact
 $Script:Warnings  = New-Object System.Collections.ArrayList
@@ -1502,6 +1502,7 @@ function Read-Windows {
         if ($cv -and $cv.DisplayVersion) { $sec.pairs['Feature update'] = $cv.DisplayVersion }
         $sec.pairs['Architecture'] = $os.OSArchitecture
         $sec.pairs['Install date'] = Format-Date $os.InstallDate
+        if ($sec.pairs['Install date']) { $sec.summary['InstallDate'] = $sec.pairs['Install date'] }
         $boot = ConvertTo-DateTime $os.LastBootUpTime
         if ($boot) {
             $sec.pairs['Last boot'] = $boot.ToString('yyyy-MM-dd HH:mm')
@@ -1561,6 +1562,16 @@ function Read-Windows {
     if ($qfe.Count -gt 0) {
         $sec.pairs['Installed updates'] = $qfe.Count
         $sorted = $qfe | Sort-Object { ConvertTo-DateTime $_.InstalledOn } -Descending | Select-Object -First 8
+        $newestUpd = $sorted | Where-Object { ConvertTo-DateTime $_.InstalledOn } | Select-Object -First 1
+        if ($newestUpd) {
+            $luDate = Format-Date $newestUpd.InstalledOn 'yyyy-MM-dd'
+            $luId = [string]$newestUpd.HotFixID
+            $luVal = $luDate
+            if ($luId) { $luVal = '{0} ({1})' -f $luDate, $luId }
+            $sec.pairs['Last update installed'] = $luVal
+            $sec.widgets['lastUpdate'] = $luDate
+            $sec.widgets['lastUpdateId'] = $luId
+        }
         $uRows = @()
         $updateWidgets = @()
         foreach ($q in $sorted) {
@@ -2510,6 +2521,7 @@ $Script:Icons = @{
     'package'  = '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>'
     'services' = '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'
     'clock'    = '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'
+    'calendar' = '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>'
     'zap'      = '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'
     'therm'    = '<path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>'
 }
@@ -2885,6 +2897,7 @@ function ConvertTo-HtmlWidget {
             }
             if ($w['build']) { $tiles += (ConvertTo-HtmlStat -Label 'Build' -Value ([string]$w['build']) -Icon 'board') }
             if ($null -ne $w['updateCount']) { $tiles += (ConvertTo-HtmlStat -Label 'Installed updates' -Value ([string]$w['updateCount']) -Icon 'package') }
+            if ($w['lastUpdate']) { $tiles += (ConvertTo-HtmlStat -Label 'Last update' -Value ([string]$w['lastUpdate']) -Icon 'calendar' -Sub ([string]$w['lastUpdateId'])) }
             if ($tiles -ne '') { $out = ('<div class="wrow">{0}</div>' -f $tiles) }
             $updates = @($w['updates'])
             if ($updates.Count -gt 0) {
@@ -3027,6 +3040,9 @@ function ConvertTo-HtmlHero {
     $os = $null
     if ($Data.Contains('Windows')) { $os = [string]$Data['Windows'].summary['OS'] }
     if ($os) { $rows += ('<div class="mrow"><span class="mk">OS</span><span class="mv">{0}</span></div>' -f (ConvertTo-HtmlText $os)) }
+    $instVal = $null
+    if ($Data.Contains('Windows')) { $instVal = [string]$Data['Windows'].summary['InstallDate'] }
+    if ($instVal) { $rows += ('<div class="mrow"><span class="mk">Installed</span><span class="mv">{0}</span></div>' -f (ConvertTo-HtmlText $instVal)) }
     $boardVal = $null
     if ($Data.Contains('System')) { $boardVal = [string]$Data['System'].summary['Motherboard'] }
     if ($boardVal) { $rows += ('<div class="mrow"><span class="mk">Board</span><span class="mv">{0}</span></div>' -f (ConvertTo-HtmlText $boardVal)) }

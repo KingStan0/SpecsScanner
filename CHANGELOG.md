@@ -4,6 +4,15 @@ All notable changes to SpecsScanner are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-10-17
+
+### Added
+
+- Windows section: a **Last update** tile and **Last update installed** row show
+  when Windows last received an update (date + KB number).
+- Overview hero: the Windows installation date now appears in the identity
+  block ("Installed") right below the OS line.
+
 ## [2.0.1] - 2026-10-17
 
 Code-quality release: no functional or visual changes. The script now passes
