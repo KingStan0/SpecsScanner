@@ -4,6 +4,27 @@ All notable changes to SpecsScanner are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.5] - 2026-10-18
+
+### Changed
+
+- Time values are now exact end to end: the hero row shows the full scan
+  range (`Scanned 17:33:37 -> 17:33:52 (14.7 s)`), `Last boot` keeps seconds,
+  and `Uptime` includes seconds and is recomputed against the final scan
+  timestamp - so `Last boot` + `Uptime` always add up to the scan end.
+- `Signatures updated` prefers Defender's own event log (its WMI timestamp
+  can lag hours behind) and shows seconds.
+- The console reports both total time and scan time:
+  `Finished in 15.2s (scan 14.7s)`.
+- JSON output adds `started` and `durationSeconds` to the `scanner` block.
+
+### Fixed
+
+- Install dates: an 8-digit `ddMMyyyy` registry value (e.g. `01022026`) could
+  be misread as a year in the 0100s; parsing now sanity-checks the year and
+  falls through to the next format.
+- UTC-kind timestamps are now converted to local time before display.
+
 ## [2.1.4] - 2026-10-18
 
 ### Fixed

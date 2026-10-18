@@ -81,7 +81,7 @@ $ErrorActionPreference = 'Continue'
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-$Script:Version   = '2.1.4'
+$Script:Version   = '2.1.5'
 $Script:IsAdmin   = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Script:RedactMode = [bool]$Redact
 $Script:Warnings  = New-Object System.Collections.ArrayList
@@ -167,11 +167,22 @@ function Format-CountPhrase {
 function ConvertTo-DateTime {
     param($Value)
     if ($null -eq $Value) { return $null }
-    if ($Value -is [datetime]) { return $Value }
+    if ($Value -is [datetime]) {
+        # Never display a UTC-kind timestamp raw; always convert to local time.
+        if ($Value.Kind -eq [System.DateTimeKind]::Utc) { return $Value.ToLocalTime() }
+        return $Value
+    }
     # Try the CIM/WMI date format first, then .NET parsing.
     $wmiDate = Invoke-Safe { [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$Value) }
-    if ($null -ne $wmiDate) { return $wmiDate }
-    try { return [datetime]::Parse([string]$Value) } catch { return $null }
+    if ($null -ne $wmiDate) {
+        if ($wmiDate.Kind -eq [System.DateTimeKind]::Utc) { return $wmiDate.ToLocalTime() }
+        return $wmiDate
+    }
+    try {
+        $parsed = [datetime]::Parse([string]$Value)
+        if ($parsed.Kind -eq [System.DateTimeKind]::Utc) { return $parsed.ToLocalTime() }
+        return $parsed
+    } catch { return $null }
 }
 
 function Format-Date {
@@ -243,10 +254,12 @@ function ConvertTo-InstallDateText {
     $v = $Value.Trim()
     $inv = [System.Globalization.CultureInfo]::InvariantCulture
     $styles = [System.Globalization.DateTimeStyles]::None
+    # Sanity window: reject misparses such as a ddMMyyyy value read as yyyyMMdd
+    # ('01022026' -> year 0102) and any other nonsense years.
     if ($v -match '^\d{8}$') {
         $d = [datetime]::MinValue
-        if ([datetime]::TryParseExact($v, 'yyyyMMdd', $inv, $styles, [ref]$d)) { return $d.ToString('yyyy-MM-dd') }
-        if ([datetime]::TryParseExact($v, 'ddMMyyyy', $inv, $styles, [ref]$d)) { return $d.ToString('yyyy-MM-dd') }
+        if ([datetime]::TryParseExact($v, 'yyyyMMdd', $inv, $styles, [ref]$d) -and $d.Year -ge 1990 -and $d.Year -le 2100) { return $d.ToString('yyyy-MM-dd') }
+        if ([datetime]::TryParseExact($v, 'ddMMyyyy', $inv, $styles, [ref]$d) -and $d.Year -ge 1990 -and $d.Year -le 2100) { return $d.ToString('yyyy-MM-dd') }
         return $null
     }
     if ($v -match '^\d{9,10}$') {
@@ -255,7 +268,7 @@ function ConvertTo-InstallDateText {
         return $null
     }
     $d = [datetime]::MinValue
-    if ([datetime]::TryParse($v, $inv, $styles, [ref]$d)) { return $d.ToString('yyyy-MM-dd') }
+    if ([datetime]::TryParse($v, $inv, $styles, [ref]$d) -and $d.Year -ge 1990 -and $d.Year -le 2100) { return $d.ToString('yyyy-MM-dd') }
     return $null
 }
 
@@ -1371,7 +1384,15 @@ function Read-Security {
         $am = 'Disabled'; if ($mp.AMServiceEnabled) { $am = 'Enabled' }
         $sec.pairs['Defender service'] = $am
         if ($mp.AntivirusSignatureVersion) { $sec.pairs['Defender signature version'] = $mp.AntivirusSignatureVersion }
-        if ($mp.AntivirusSignatureLastUpdated) { $sec.pairs['Signatures updated'] = Format-Date $mp.AntivirusSignatureLastUpdated }
+        # Defender's WMI timestamp can lag hours behind; its own event log has
+        # the real update moment, so show the newest of the two.
+        $sigTime = $null
+        $sigEvents = @(Invoke-Safe { Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Windows Defender/Operational'; Id = 2000 } -MaxEvents 5 -ErrorAction Stop } @())
+        $sigEvents = @($sigEvents | Where-Object { $_ } | Sort-Object TimeCreated -Descending)
+        if ($sigEvents.Count -gt 0 -and $sigEvents[0].TimeCreated) { $sigTime = ConvertTo-DateTime $sigEvents[0].TimeCreated }
+        $sigWmi = ConvertTo-DateTime $mp.AntivirusSignatureLastUpdated
+        if ($sigWmi -and ($null -eq $sigTime -or $sigWmi -gt $sigTime)) { $sigTime = $sigWmi }
+        if ($sigTime) { $sec.pairs['Signatures updated'] = $sigTime.ToString('yyyy-MM-dd HH:mm:ss') }
         if ($mp.PSObject.Properties['IsTamperProtected'] -and $null -ne $mp.IsTamperProtected) {
             $tp = 'Disabled'; if ($mp.IsTamperProtected) { $tp = 'Enabled' }
             $sec.pairs['Tamper protection'] = $tp
@@ -1525,9 +1546,12 @@ function Read-Windows {
         if ($sec.pairs['Install date']) { $sec.summary['InstallDate'] = $sec.pairs['Install date'] }
         $boot = ConvertTo-DateTime $os.LastBootUpTime
         if ($boot) {
-            $sec.pairs['Last boot'] = $boot.ToString('yyyy-MM-dd HH:mm')
+            $sec.pairs['Last boot'] = $boot.ToString('yyyy-MM-dd HH:mm:ss')
+            # Keep the raw value: Main recomputes Uptime after the scan so that
+            # 'Last boot' + 'Uptime' always add up to the final scan timestamp.
+            $sec.widgets['lastBoot'] = $boot
             $up = (Get-Date) - $boot
-            $upText = '{0}d {1}h {2}m' -f $up.Days, $up.Hours, $up.Minutes
+            $upText = '{0}d {1}h {2}m {3}s' -f $up.Days, $up.Hours, $up.Minutes, $up.Seconds
             $sec.pairs['Uptime'] = $upText
             $sec.summary['Uptime'] = $upText
         }
@@ -3069,7 +3093,17 @@ function ConvertTo-HtmlHero {
     $uptimeVal = $null
     if ($Data.Contains('Windows')) { $uptimeVal = [string]$Data['Windows'].summary['Uptime'] }
     if ($uptimeVal) { $rows += ('<div class="mrow"><span class="mk">Uptime</span><span class="mv">{0}</span></div>' -f (ConvertTo-HtmlText $uptimeVal)) }
-    $rows += ('<div class="mrow"><span class="mk">Scanned</span><span class="mv">{0} in {1} s</span></div>' -f (ConvertTo-HtmlText ([string]$Meta.Date)), (ConvertTo-HtmlText ([string]$Meta.Elapsed)))
+    $scanStartVal = [string]$Meta.Started
+    $scanEndVal = [string]$Meta.Date
+    $scanEndShown = $scanEndVal
+    if ($scanStartVal.Length -ge 19 -and $scanEndVal.Length -ge 19 -and $scanStartVal.Substring(0, 10) -eq $scanEndVal.Substring(0, 10)) {
+        $scanEndShown = $scanEndVal.Substring(11)
+    }
+    if ($scanStartVal) {
+        $rows += ('<div class="mrow"><span class="mk">Scanned</span><span class="mv">{0} &rarr; {1} ({2} s)</span></div>' -f (ConvertTo-HtmlText $scanStartVal), (ConvertTo-HtmlText $scanEndShown), (ConvertTo-HtmlText ([string]$Meta.Elapsed)))
+    } else {
+        $rows += ('<div class="mrow"><span class="mk">Scanned</span><span class="mv">{0} in {1} s</span></div>' -f (ConvertTo-HtmlText $scanEndVal), (ConvertTo-HtmlText ([string]$Meta.Elapsed)))
+    }
     $ranAs = 'Standard user'
     if ($Meta.IsAdmin) { $ranAs = 'Administrator' }
     $rows += ('<div class="mrow"><span class="mk">Ran as</span><span class="mv">{0}</span></div>' -f (ConvertTo-HtmlText $ranAs))
@@ -3414,13 +3448,15 @@ function ConvertTo-SpecsJson {
     param($Data, $Meta, $Order)
     $out = [ordered]@{}
     $out['scanner'] = [ordered]@{
-        name       = 'SpecsScanner'
-        version    = $Meta.Version
-        generated  = $Meta.Date
-        hostname   = $Meta.Hostname
-        user       = $Meta.User
-        elevated   = $Meta.IsAdmin
-        powershell = $Meta.PSVersion
+        name            = 'SpecsScanner'
+        version         = $Meta.Version
+        started         = $Meta.Started
+        generated       = $Meta.Date
+        durationSeconds = $Meta.Elapsed
+        hostname        = $Meta.Hostname
+        user            = $Meta.User
+        elevated        = $Meta.IsAdmin
+        powershell      = $Meta.PSVersion
     }
     foreach ($key in $Order) {
         if (-not $Data.Contains($key)) { continue }
@@ -3444,7 +3480,9 @@ function ConvertTo-SpecsJson {
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+$scanStart = Get-Date
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
+$swTotal = [System.Diagnostics.Stopwatch]::StartNew()
 Write-Host ''
 Write-Host ('  SpecsScanner v{0}' -f $Script:Version) -ForegroundColor Magenta
 if ($Script:IsAdmin) { Write-Host '  Running as Administrator - full detail mode' -ForegroundColor DarkGray }
@@ -3518,12 +3556,31 @@ foreach ($key in $orderedKeys) {
     }
 }
 $sw.Stop()
+$scanEnd = Get-Date
 
-$stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+# Reconcile the Windows uptime with the end-of-scan timestamp so that
+# 'Last boot' + 'Uptime' always add up to 'Scanned ... -> end' exactly.
+# Both sides are truncated to whole seconds, matching what is displayed.
+if ($data.Contains('Windows')) {
+    $bootRaw = $data['Windows'].widgets['lastBoot']
+    if ($bootRaw -is [datetime]) {
+        $endSec = $scanEnd.AddTicks(-($scanEnd.Ticks % [TimeSpan]::TicksPerSecond))
+        $bootSec = $bootRaw.AddTicks(-($bootRaw.Ticks % [TimeSpan]::TicksPerSecond))
+        $up = $endSec - $bootSec
+        if ($up.TotalSeconds -ge 0) {
+            $upText = '{0}d {1}h {2}m {3}s' -f $up.Days, $up.Hours, $up.Minutes, $up.Seconds
+            $data['Windows'].pairs['Uptime'] = $upText
+            $data['Windows'].summary['Uptime'] = $upText
+        }
+    }
+}
+
+$stamp = $scanEnd.ToString('yyyyMMdd-HHmmss')
 $meta = [ordered]@{
     Hostname  = $env:COMPUTERNAME
     User      = '{0}\{1}' -f $env:USERDOMAIN, $env:USERNAME
-    Date      = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    Started   = $scanStart.ToString('yyyy-MM-dd HH:mm:ss')
+    Date      = $scanEnd.ToString('yyyy-MM-dd HH:mm:ss')
     IsAdmin   = $Script:IsAdmin
     Version   = $Script:Version
     PSVersion = $PSVersionTable.PSVersion.ToString()
@@ -3551,6 +3608,7 @@ if ($Format -eq 'Json' -or $Format -eq 'Both') {
     Write-TextFile -Path $paths.json -Content $json
     [void]$written.Add($paths.json)
 }
+$swTotal.Stop()
 
 Write-Host ''
 foreach ($f in $written) {
@@ -3560,7 +3618,7 @@ foreach ($f in $written) {
     }
     Write-Host ('  [OK] {0}{1}' -f $f, $sizeText) -ForegroundColor Green
 }
-Write-Host ('  Finished in {0:N1}s' -f $sw.Elapsed.TotalSeconds) -ForegroundColor DarkGray
+Write-Host ('  Finished in {0:N1}s (scan {1:N1}s)' -f $swTotal.Elapsed.TotalSeconds, $sw.Elapsed.TotalSeconds) -ForegroundColor DarkGray
 
 if ($Script:Warnings.Count -gt 0) {
     Write-Host ''
