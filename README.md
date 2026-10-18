@@ -109,7 +109,7 @@ For 100% coverage: right-click PowerShell -> **Run as administrator**, then scan
 
 ```json
 {
-  "scanner": { "name": "SpecsScanner", "version": "2.1.3", "elevated": true },
+  "scanner": { "name": "SpecsScanner", "version": "2.1.4", "elevated": true },
   "CPU": { "title": "Processor", "values": { "Name": "AMD Ryzen 5 5600G", "Cores": 6, "...": "..." }, "tables": [ ] },
   "...": { }
 }

@@ -4,6 +4,17 @@ All notable changes to SpecsScanner are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.4] - 2026-10-18
+
+### Fixed
+
+- Graphics: adapters are now ranked before the hero GPU line, the section
+  subtitle and the adapter table are built - physical GPUs with readable VRAM
+  come first (largest first), then other physical adapters, then
+  virtual/basic/remote display adapters (Parsec, Microsoft Basic Display,
+  ...). Machines with virtual display adapters no longer show the virtual
+  adapter as the main GPU instead of the real one.
+
 ## [2.1.3] - 2026-10-17
 
 ### Changed

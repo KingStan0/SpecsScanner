@@ -81,7 +81,7 @@ $ErrorActionPreference = 'Continue'
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-$Script:Version   = '2.1.3'
+$Script:Version   = '2.1.4'
 $Script:IsAdmin   = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Script:RedactMode = [bool]$Redact
 $Script:Warnings  = New-Object System.Collections.ArrayList
@@ -671,19 +671,36 @@ function Read-GPU {
     }
 
     $vramMap = Invoke-Safe { Get-VramMap } @{}
-    $rows = @()
-    $adapterWidgets = @()
     $usedCapped = $false
 
+    # Rank adapters so the report leads with the real GPU: physical adapters
+    # with readable VRAM first (largest first), then other physical adapters,
+    # then virtual/basic/remote display adapters (Parsec, Basic Display, ...).
+    $ranked = @()
     foreach ($vc in $vcs) {
         $vram = $null
-        $vramText = $null
         foreach ($key in $vramMap.Keys) {
             if ($key -and ($vc.Name -like "*$key*" -or $key -like "*$($vc.Name)*")) {
                 $vram = $vramMap[$key]
                 break
             }
         }
+        $rank = 0
+        if ($vc.Name -match '(?i)virtual|basic display|basic render|remote display|indirect display|parsec|splashtop|mirror driver') { $rank = 2 }
+        elseif (-not $vram -and -not ($vc.AdapterRAM -and [double]$vc.AdapterRAM -gt 0)) { $rank = 1 }
+        $ranked += [pscustomobject]@{ vc = $vc; vram = $vram; rank = $rank }
+    }
+    $ranked = @($ranked | Sort-Object -Property @{ Expression = { $_.rank } },
+        @{ Expression = { if ($_.vram) { 0 - [double]$_.vram } else { 0 } } },
+        @{ Expression = { [string]$_.vc.Name } })
+
+    $rows = @()
+    $adapterWidgets = @()
+
+    foreach ($item in $ranked) {
+        $vc = $item.vc
+        $vram = $item.vram
+        $vramText = $null
         if ($vram) {
             $vramText = Format-ByteSize $vram
         } elseif ($vc.AdapterRAM -and [double]$vc.AdapterRAM -gt 0) {
